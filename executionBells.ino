@@ -41,9 +41,9 @@ void pulseB(unsigned long noteDuration);
 void pulseC(unsigned long noteDuration);
 void executeToques();
 void executeBandeo();
+void(* resetFunc) (void) = 0;
 
 void setup() {
-  // put your setup code here, to run once:
   Serial.begin(9600);
   pinMode(MOTOR_MAYOR, OUTPUT);
   pinMode(MOTOR_MEDIANA, OUTPUT);
@@ -59,12 +59,11 @@ void setup() {
 }
 
 void loop() {
-
-  if (Serial.available() > 6) {
+    //Bloquear mientras está reproduciendo
+  if (Serial.available() > 6 && !finished) {
     char *incomingBytes = new char[6];
     char *note = new char;
     note[0] = Serial.read();
-    //Serial.readBytes(note,1);
     Serial.readBytes(incomingBytes,6);
 
     if(incomingBytes[0]=='n') {
@@ -72,12 +71,22 @@ void loop() {
       executionNotes.Trim();
       executionTime.Trim();
       index = 0;
-      Serial.print("Free ram: ");
+      Serial.print("Finished Free ram: ");
       Serial.println(freeRam ());
     } 
     else {
       executionNotes.Add(note[0]);
       executionTime.Add(atoi(incomingBytes));
+      delete note;
+      delete [] incomingBytes;
+
+      //Serial.print("before trim ram: ");
+      //Serial.print(freeRam ());
+      //executionNotes.Trim();
+      //executionTime.Trim();
+      //Serial.print(", after trim ram: ");
+      //Serial.println(freeRam ());
+      
     }
   }
 
@@ -177,8 +186,15 @@ void executeToques(){
   if(index >= executionNotes.Count() && !progressA && !progressB && !progressC){
     finished = false;
     //posible liberación de memoria
+
     executionNotes.Clear();
     executionTime.Clear();
+    //executionNotes.Trim(1);
+    //executionTime.Trim(1);
+
+    //executionNotes.freeMemory();
+    //executionTime.freeMemory();
+
     nextNote = true;
     serialFlush();
   }
