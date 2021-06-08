@@ -10,10 +10,10 @@ const int MARTILLO_MENOR = 7;
 const int RELOJ_A = 8;
 const int RELOJ_B = 9;
 const int BACKLIGHT = 10; //maybe the raspberry could do this
-bool finished = false;
-char exe[7];
+const int RAM_MEMORY_LIMIT = 700;
+const char ALLOW_COMMUNICATION = 'z';
 int index=0;
-int addr = 0;
+char firstIncomingByte = ALLOW_COMMUNICATION;
 
 unsigned long timeA = 0;
 unsigned long timeB = 0;
@@ -29,6 +29,7 @@ bool progressA = false;
 bool progressB = false;
 bool progressC = false;
 bool start = false;
+bool finished = false;
 
 List<char> executionNotes;
 List<int> executionTime;
@@ -59,8 +60,39 @@ void setup() {
 }
 
 void loop() {
-    //Bloquear mientras está reproduciendo
-  if (Serial.available() > 6 && !finished) {
+
+  if(Serial.available()>0 && firstIncomingByte == ALLOW_COMMUNICATION){
+    firstIncomingByte = Serial.read();
+  }
+  if(firstIncomingByte == 'b'){
+    if (Serial.available() > 13 && !finished) {
+    char *incomingBytesForTime = new char[6];
+    char *incomingBytesForDuration = new char[6];
+    char *note = new char;
+    note[0] = Serial.read();
+    Serial.readBytes(incomingBytesForTime,6);
+    Serial.readBytes(incomingBytesForDuration,6);
+
+    if(incomingBytesForTime[0]=='n') {
+      finished = true;
+      executionNotes.Trim();
+      executionTime.Trim();
+      index = 0;
+      Serial.print("Finished Free ram: ");
+      Serial.println(freeRam ());
+    } 
+    else {
+      executionNotes.Add(note[0]);
+      executionTime.Add(atoi(incomingBytesForTime));
+      executionDuration.Add(atoi(incomingBytesForDuration));
+      delete note;
+      delete [] incomingBytesForTime;
+      delete [] incomingBytesForDuration;    
+    }
+  }
+  } 
+  else if (firstIncomingByte == 't'){
+    if (Serial.available() > 6 && !finished) {
     char *incomingBytes = new char[6];
     char *note = new char;
     note[0] = Serial.read();
@@ -78,20 +110,14 @@ void loop() {
       executionNotes.Add(note[0]);
       executionTime.Add(atoi(incomingBytes));
       delete note;
-      delete [] incomingBytes;
-
-      //Serial.print("before trim ram: ");
-      //Serial.print(freeRam ());
-      //executionNotes.Trim();
-      //executionTime.Trim();
-      //Serial.print(", after trim ram: ");
-      //Serial.println(freeRam ());
-      
+      delete [] incomingBytes;     
     }
+  }
   }
 
   if(finished){
-    executeToques();
+    if(firstIncomingByte == 't') executeToques();
+    else executeBandeo();
   }
 }
 
@@ -185,21 +211,68 @@ void executeToques(){
   //Once last note is played.  Clear lists.
   if(index >= executionNotes.Count() && !progressA && !progressB && !progressC){
     finished = false;
-    //posible liberación de memoria
-
     executionNotes.Clear();
     executionTime.Clear();
     //executionNotes.Trim(1);
     //executionTime.Trim(1);
-
     //executionNotes.freeMemory();
     //executionTime.freeMemory();
-
     nextNote = true;
+    firstIncomingByte = ALLOW_COMMUNICATION;
     serialFlush();
+    if(freeRam() < RAM_MEMORY_LIMIT)
+      resetFunc();
   }
 }
-void executeBandeo(){}
+void executeBandeo(){
+  static unsigned long fixedDurationA = 0;
+  static unsigned long fixedDurationB = 0;
+  static unsigned long fixedDurationC = 0;
+
+  //Update for next note
+  if(nextNote && index < executionNotes.Count()){
+    char note = executionNotes[index];
+    timeForNextNote = executionTime[index];
+    
+    switch(note){
+      case 'A':
+        activeA = true;
+        fixedDurationA = executionDuration[index];
+        break;
+      case 'B':
+        activeB = true;
+        fixedDurationB = executionDuration[index];
+        break;
+      case 'C':
+        activeC = true;
+        fixedDurationC = executionDuration[index];
+        break;
+    }
+    noteMillis = millis();
+    nextNote = false;
+  }
+
+  pulseA(fixedDurationA);
+  pulseB(fixedDurationB);
+  pulseC(fixedDurationC);
+
+  //Once last note is played.  Clear lists.
+  if(index >= executionNotes.Count() && !progressA && !progressB && !progressC){
+    finished = false;
+    executionNotes.Clear();
+    executionTime.Clear();
+    executionDuration.Clear();
+    //executionNotes.Trim(1);
+    //executionTime.Trim(1);
+    //executionNotes.freeMemory();
+    //executionTime.freeMemory();
+    nextNote = true;
+    firstIncomingByte = ALLOW_COMMUNICATION;
+    serialFlush();
+    if(freeRam() < RAM_MEMORY_LIMIT)
+      resetFunc();
+  }
+}
 
 void serialFlush(){
   while(Serial.available() > 0) {
