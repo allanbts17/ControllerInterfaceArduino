@@ -1,6 +1,11 @@
 #include "ListLib.h"
 #include <EEPROM.h>
 
+const int Q1 = A0;
+const int Q2 = A1;
+const int Q3 = A2;
+const int Q4 = A3;
+const int STD = A4;
 const int MOTOR_MAYOR = 2;      //A mayor
 const int MOTOR_MEDIANA = 3;    //B mediana
 const int MOTOR_MENOR = 4;      //C menor
@@ -12,6 +17,8 @@ const int RELOJ_B = 9;
 const int BACKLIGHT = 10; //maybe the raspberry could do this
 const int RAM_MEMORY_LIMIT = 700;
 const char ALLOW_COMMUNICATION = 'z';
+const char STOP_EXECUTION = 's';
+const char EXECUTION_FINISHED = 'f';
 int index=0;
 char firstIncomingByte = ALLOW_COMMUNICATION;
 
@@ -42,6 +49,8 @@ void pulseB(unsigned long noteDuration);
 void pulseC(unsigned long noteDuration);
 void executeToques();
 void executeBandeo();
+void phoneConnection();
+void pause(unsigned long timeInMilliSeconds);
 void(* resetFunc) (void) = 0;
 
 void setup() {
@@ -54,18 +63,39 @@ void setup() {
   pinMode(MARTILLO_MENOR, OUTPUT);
   pinMode(RELOJ_A, OUTPUT);
   pinMode(RELOJ_B, OUTPUT);
+  pinMode(Q1,INPUT);
+  pinMode(Q2,INPUT);
+  pinMode(Q3,INPUT);
+  pinMode(Q4,INPUT);
+  pinMode(STD,INPUT);
 
   for(int i=2;i<10;i++)
     digitalWrite(i,HIGH);
 }
 
-void loop() {
 
+void loop() {
+  //pause(6000);
+  //phoneConnection();
   if(Serial.available()>0 && firstIncomingByte == ALLOW_COMMUNICATION){
     firstIncomingByte = Serial.read();
   }
-  if(firstIncomingByte == 'b'){
-    if (Serial.available() > 13 && !finished) {
+  if(firstIncomingByte == STOP_EXECUTION){
+    finished = false;
+    progressA = false;
+    progressB = false;
+    progressC = false;
+    executionNotes.Clear();
+    executionTime.Clear();
+    executionDuration.Clear();
+    nextNote = true;
+    serialFlush();
+    firstIncomingByte == ALLOW_COMMUNICATION;
+    if(freeRam() < RAM_MEMORY_LIMIT)
+      resetFunc();
+  }
+  else if(firstIncomingByte == 'b'){
+    if (Serial.available() > 12 && !finished) {
     char *incomingBytesForTime = new char[6];
     char *incomingBytesForDuration = new char[6];
     char *note = new char;
@@ -78,8 +108,10 @@ void loop() {
       executionNotes.Trim();
       executionTime.Trim();
       index = 0;
-      Serial.print("Finished Free ram: ");
-      Serial.println(freeRam ());
+
+      firstIncomingByte = ALLOW_COMMUNICATION;
+      //Serial.print("Finished Free ram: ");
+      //Serial.println(freeRam ());
     } 
     else {
       executionNotes.Add(note[0]);
@@ -103,8 +135,10 @@ void loop() {
       executionNotes.Trim();
       executionTime.Trim();
       index = 0;
-      Serial.print("Finished Free ram: ");
-      Serial.println(freeRam ());
+
+      firstIncomingByte = ALLOW_COMMUNICATION;
+      //Serial.print("Finished Free ram: ");
+      //Serial.println(freeRam ());
     } 
     else {
       executionNotes.Add(note[0]);
@@ -118,6 +152,58 @@ void loop() {
   if(finished){
     if(firstIncomingByte == 't') executeToques();
     else executeBandeo();
+  }
+}
+
+void pause(unsigned long timeInMilliSeconds) {
+	    unsigned long timestamp = millis();
+	    do {
+	    } while (millis() < timestamp + timeInMilliSeconds);
+	}
+
+void phoneConnection(){
+  uint8_t number;
+  bool signal;
+  signal = digitalRead(STD);
+  //signal = true;
+  if(signal == HIGH){
+    //pause(100);
+    number = (0x00 | (digitalRead(Q1) << 0) | (digitalRead(Q2) << 1) | (digitalRead(Q3) << 2) | (digitalRead(Q4) << 3));
+    //number = (0x00 | (0 << 0) | (0 << 1) | (1 << 2) | (0 << 3));
+    switch (number)
+    {
+      case 0x01:
+        Serial.print('1');
+        break;
+      case 0x02:
+        Serial.print('2');
+        break;
+      case 0x03:
+        Serial.print('3');
+        break;
+      case 0x04:
+        Serial.print('4');
+        //Serial.print(0x04);
+        break;
+      case 0x05:
+        Serial.print('5');
+        break;
+      case 0x06:
+        Serial.print('6');
+        break;
+      case 7:
+        Serial.print('7');
+        break;
+      case 0x08:
+        Serial.print('8');
+        break;
+      case 0x09:
+        Serial.print('9');
+        break;
+      case 0x0A:
+        Serial.print('0');
+        break;
+    }
   }
 }
 
@@ -218,8 +304,11 @@ void executeToques(){
     //executionNotes.freeMemory();
     //executionTime.freeMemory();
     nextNote = true;
-    firstIncomingByte = ALLOW_COMMUNICATION;
     serialFlush();
+    
+    //Tell raspberry
+    Serial.print(EXECUTION_FINISHED);
+
     if(freeRam() < RAM_MEMORY_LIMIT)
       resetFunc();
   }
@@ -262,12 +351,11 @@ void executeBandeo(){
     executionNotes.Clear();
     executionTime.Clear();
     executionDuration.Clear();
-    //executionNotes.Trim(1);
-    //executionTime.Trim(1);
-    //executionNotes.freeMemory();
-    //executionTime.freeMemory();
     nextNote = true;
-    firstIncomingByte = ALLOW_COMMUNICATION;
+
+    //Tell raspberry
+    Serial.print(EXECUTION_FINISHED);
+
     serialFlush();
     if(freeRam() < RAM_MEMORY_LIMIT)
       resetFunc();
