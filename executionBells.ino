@@ -1,3 +1,4 @@
+
 #include "ListLib.h"
 #include <EEPROM.h>
 
@@ -14,11 +15,16 @@ const int MARTILLO_MEDIANA = 6;
 const int MARTILLO_MENOR = 7;
 const int RELOJ_A = 8;
 const int RELOJ_B = 9;
-const int BACKLIGHT = 10; //maybe the raspberry could do this
+const int BACKLIGHT = 9; //its 10 //maybe the raspberry could do this
 const int RAM_MEMORY_LIMIT = 700;
 const char ALLOW_COMMUNICATION = 'z';
 const char STOP_EXECUTION = 's';
 const char EXECUTION_FINISHED = 'f';
+const char RB_BYTE = 'B';
+const char RA_BYTE = 'A';
+const char BACKLIGHT_BYTE_ON = 'L';
+const char BACKLIGHT_BYTE_OFF = 'l';
+const char ARE_U_OK = '?';
 int index=0;
 char firstIncomingByte = ALLOW_COMMUNICATION;
 
@@ -28,6 +34,8 @@ unsigned long timeC = 0;
 unsigned long noteTime = 1000;
 unsigned long noteMillis = 0;
 unsigned long timeForNextNote = 0;
+unsigned long initMillisB;
+unsigned long initMillisA;
 bool nextNote = true;
 bool activeA = false;
 bool activeB = false;
@@ -37,6 +45,11 @@ bool progressB = false;
 bool progressC = false;
 bool start = false;
 bool finished = false;
+bool clockAOn = false;
+bool clockAWait = false;
+bool clockBOn = false;
+bool clockBWait = false;
+bool ifToques;
 
 List<char> executionNotes;
 List<int> executionTime;
@@ -44,16 +57,19 @@ List<int> executionDuration;
 
 void serialFlush();
 int freeRam ();
-void pulseA(unsigned long noteDuration);
-void pulseB(unsigned long noteDuration);
-void pulseC(unsigned long noteDuration);
+void pulseA(unsigned long noteDuration, int mayor);
+void pulseB(unsigned long noteDuration, int mediana);
+void pulseC(unsigned long noteDuration, int menor);
 void executeToques();
 void executeBandeo();
 void phoneConnection();
 void pause(unsigned long timeInMilliSeconds);
 void(* resetFunc) (void) = 0;
+void clockPulseA(unsigned long waitTime);
+void clockPulseB(unsigned long waitTime);
 
 void setup() {
+  
   Serial.begin(9600);
   pinMode(MOTOR_MAYOR, OUTPUT);
   pinMode(MOTOR_MEDIANA, OUTPUT);
@@ -75,25 +91,63 @@ void setup() {
 
 
 void loop() {
-  //pause(6000);
-  //phoneConnection();
+  phoneConnection();
+  
+  //Review the first incoming byte which tells the operation
   if(Serial.available()>0 && firstIncomingByte == ALLOW_COMMUNICATION){
     firstIncomingByte = Serial.read();
+  } 
+  
+  //For regular clock pulse
+  if(firstIncomingByte == RA_BYTE){
+    clockAOn = true;
+    firstIncomingByte = ALLOW_COMMUNICATION;
   }
-  if(firstIncomingByte == STOP_EXECUTION){
+
+  //For clock backlight
+  else if (firstIncomingByte == BACKLIGHT_BYTE_ON){
+    digitalWrite(BACKLIGHT,LOW);
+    firstIncomingByte = ALLOW_COMMUNICATION;
+  }
+  else if (firstIncomingByte == BACKLIGHT_BYTE_OFF){
+    digitalWrite(BACKLIGHT,HIGH);
+    firstIncomingByte = ALLOW_COMMUNICATION;
+  }
+
+  else if(firstIncomingByte == ARE_U_OK){
+    Serial.print(ARE_U_OK);
+  }
+
+  //For stop execution
+  else if(firstIncomingByte == STOP_EXECUTION){
     finished = false;
     progressA = false;
     progressB = false;
     progressC = false;
+
+    //Clearing lists
     executionNotes.Clear();
     executionTime.Clear();
     executionDuration.Clear();
     nextNote = true;
     serialFlush();
-    firstIncomingByte == ALLOW_COMMUNICATION;
+    firstIncomingByte = ALLOW_COMMUNICATION;
+
+    digitalWrite(MOTOR_MAYOR,HIGH);
+    digitalWrite(MOTOR_MEDIANA,HIGH);
+    digitalWrite(MOTOR_MENOR,HIGH);
+    digitalWrite(MARTILLO_MAYOR,HIGH);
+    digitalWrite(MARTILLO_MEDIANA,HIGH);
+    digitalWrite(MARTILLO_MENOR,HIGH);
+
     if(freeRam() < RAM_MEMORY_LIMIT)
       resetFunc();
+
+    //Tell raspberry that execution has stopped
+    Serial.print(EXECUTION_FINISHED);
   }
+
+  //Imcoming bandeo
   else if(firstIncomingByte == 'b'){
     if (Serial.available() > 12 && !finished) {
     char *incomingBytesForTime = new char[6];
@@ -109,9 +163,8 @@ void loop() {
       executionTime.Trim();
       index = 0;
 
+      ifToques = false;
       firstIncomingByte = ALLOW_COMMUNICATION;
-      //Serial.print("Finished Free ram: ");
-      //Serial.println(freeRam ());
     } 
     else {
       executionNotes.Add(note[0]);
@@ -122,7 +175,9 @@ void loop() {
       delete [] incomingBytesForDuration;    
     }
   }
-  } 
+  }
+
+  //Incoming toque
   else if (firstIncomingByte == 't'){
     if (Serial.available() > 6 && !finished) {
     char *incomingBytes = new char[6];
@@ -135,10 +190,10 @@ void loop() {
       executionNotes.Trim();
       executionTime.Trim();
       index = 0;
+      serialFlush();
 
+      ifToques = true;
       firstIncomingByte = ALLOW_COMMUNICATION;
-      //Serial.print("Finished Free ram: ");
-      //Serial.println(freeRam ());
     } 
     else {
       executionNotes.Add(note[0]);
@@ -149,10 +204,14 @@ void loop() {
   }
   }
 
+  //If a toque or bandeo sequence finished to arrive
   if(finished){
-    if(firstIncomingByte == 't') executeToques();
+    if(ifToques) executeToques();
     else executeBandeo();
   }
+
+  clockPulseA(1000);
+  clockPulseB(1000);
 }
 
 void pause(unsigned long timeInMilliSeconds) {
@@ -213,10 +272,10 @@ int freeRam () {
   return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval); 
 }
 
-void pulseA(unsigned long noteDuration){
+void pulseA(unsigned long noteDuration, int mayor){
   if(activeA){
     if(millis() - noteMillis > timeForNextNote){
-      digitalWrite(MARTILLO_MAYOR, LOW);
+      digitalWrite(mayor, LOW);
       timeA = millis();
       activeA = false;
       progressA = true;
@@ -226,15 +285,15 @@ void pulseA(unsigned long noteDuration){
   }
   if(progressA)
     if(millis() - timeA >= noteDuration){
-      digitalWrite(MARTILLO_MAYOR, HIGH);
+      digitalWrite(mayor, HIGH);
       progressA = false;
     }
 }
 
-void pulseB(unsigned long noteDuration){
+void pulseB(unsigned long noteDuration, int mediana){
   if(activeB){
     if(millis() - noteMillis > timeForNextNote){
-      digitalWrite(MARTILLO_MEDIANA, LOW);
+      digitalWrite(mediana, LOW);
       timeB = millis();
       activeB = false;
       progressB = true;
@@ -244,15 +303,15 @@ void pulseB(unsigned long noteDuration){
   }
   if(progressB)
     if(millis() - timeB >= noteDuration){
-      digitalWrite(MARTILLO_MEDIANA, HIGH);
+      digitalWrite(mediana, HIGH);
       progressB = false;
     }
 }
 
-void pulseC(unsigned long noteDuration){
+void pulseC(unsigned long noteDuration, int menor){
   if(activeC){    
     if(millis() - noteMillis > timeForNextNote){
-      digitalWrite(MARTILLO_MENOR, LOW);
+      digitalWrite(menor, LOW);
       timeC = millis();
       activeC = false;
       progressC = true;
@@ -263,7 +322,7 @@ void pulseC(unsigned long noteDuration){
   }
   if(progressC)
     if(millis() - timeC >= noteDuration){
-      digitalWrite(MARTILLO_MENOR, HIGH);
+      digitalWrite(menor, HIGH);
       progressC = false;
     }
 }
@@ -290,9 +349,9 @@ void executeToques(){
     nextNote = false;
   }
 
-  pulseA(duration);
-  pulseB(duration);
-  pulseC(duration);
+  pulseA(duration,MARTILLO_MAYOR);
+  pulseB(duration,MARTILLO_MEDIANA);
+  pulseC(duration,MARTILLO_MENOR);
 
   //Once last note is played.  Clear lists.
   if(index >= executionNotes.Count() && !progressA && !progressB && !progressC){
@@ -341,9 +400,9 @@ void executeBandeo(){
     nextNote = false;
   }
 
-  pulseA(fixedDurationA);
-  pulseB(fixedDurationB);
-  pulseC(fixedDurationC);
+  pulseA(fixedDurationA,MOTOR_MAYOR);
+  pulseB(fixedDurationB,MOTOR_MEDIANA);
+  pulseC(fixedDurationC,MOTOR_MENOR);
 
   //Once last note is played.  Clear lists.
   if(index >= executionNotes.Count() && !progressA && !progressB && !progressC){
@@ -363,7 +422,42 @@ void executeBandeo(){
 }
 
 void serialFlush(){
+  //Serial.println("erased");
   while(Serial.available() > 0) {
     char t = Serial.read();
+    //Serial.println("erased");
   }
+}
+
+void clockPulseA(unsigned long waitTime){
+  if(clockAOn){
+    initMillisA = millis();
+    digitalWrite(RELOJ_A,LOW);
+    clockAWait = true;
+    clockAOn = false;
+  }
+
+  if(clockAWait && millis() - initMillisA > waitTime){
+    digitalWrite(RELOJ_A,HIGH);
+    clockAWait = false;
+    //serialFlush();
+    firstIncomingByte = ALLOW_COMMUNICATION;
+  }
+}
+
+void clockPulseB(unsigned long waitTime){
+  if(clockBOn){
+    initMillisB = millis();
+    digitalWrite(RELOJ_B,LOW);
+    clockBWait = true;
+    clockBOn = false;
+  }
+
+  if(clockBWait && millis() - initMillisB > waitTime){
+    digitalWrite(RELOJ_B,HIGH);
+    clockBWait = false;
+    //serialFlush();
+    firstIncomingByte = ALLOW_COMMUNICATION;
+  }
+
 }
