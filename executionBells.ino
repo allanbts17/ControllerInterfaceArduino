@@ -1,4 +1,5 @@
 
+
 #include "ListLib.h"
 #include <EEPROM.h>
 
@@ -15,7 +16,8 @@ const int MARTILLO_MEDIANA = 6;
 const int MARTILLO_MENOR = 7;
 const int RELOJ_A = 8;
 const int RELOJ_B = 9;
-const int BACKLIGHT = 9; //its 10 //maybe the raspberry could do this
+const int BACKLIGHT = 10; //its 10 //maybe the raspberry could do this
+const int Relay_tierra = 12;
 const int RAM_MEMORY_LIMIT = 700;
 const char ALLOW_COMMUNICATION = 'z';
 const char STOP_EXECUTION = 's';
@@ -84,9 +86,13 @@ void setup() {
   pinMode(Q3,INPUT);
   pinMode(Q4,INPUT);
   pinMode(STD,INPUT);
+  pinMode(Relay_tierra,OUTPUT);
 
   for(int i=2;i<10;i++)
     digitalWrite(i,HIGH);
+
+  digitalWrite(Relay_tierra,LOW); 
+  Serial.write('R');
 }
 
 
@@ -116,6 +122,7 @@ void loop() {
 
   else if(firstIncomingByte == ARE_U_OK){
     Serial.print(ARE_U_OK);
+    firstIncomingByte = ALLOW_COMMUNICATION;
   }
 
   //For stop execution
@@ -215,10 +222,10 @@ void loop() {
 }
 
 void pause(unsigned long timeInMilliSeconds) {
-	    unsigned long timestamp = millis();
-	    do {
-	    } while (millis() < timestamp + timeInMilliSeconds);
-	}
+      unsigned long timestamp = millis();
+      do {
+      } while (millis() < timestamp + timeInMilliSeconds);
+  }
 
 void phoneConnection(){
   uint8_t number;
